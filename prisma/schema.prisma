@@ -30,3 +30,27 @@ model Session {
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
 }
+
+model AIOrderInsight {
+  id              String   @id @default(cuid())
+  shop            String   // Shopify domain (e.g., "store.myshopify.com")
+  orderId         String   // Shopify order ID (numeric as string)
+  orderName       String   // Human-readable (e.g., "#1234")
+
+  insightText     String   // AI-generated insight (2-3 sentences)
+  followupSubject String?  // Email subject line
+  followupBody    String?  // Email body with {{placeholders}}
+
+  customerType    String?  // "first-time", "repeat", "vip"
+  orderValue      Float?   // Total order value (for filtering)
+
+  status          String   @default("completed") // "pending", "completed", "error"
+  errorMessage    String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([shop, orderId]) // Prevent duplicate insights for same order
+  @@index([shop, createdAt])
+  @@index([orderId])
+}
