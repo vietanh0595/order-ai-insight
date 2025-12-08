@@ -1,0 +1,26 @@
+{
+  "name": "shopify-ai-insights-lambda",
+  "version": "1.0.0",
+  "description": "AWS Lambda function to process Shopify orders and generate AI insights",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=dist/index.js --external:@aws-sdk/*",
+    "build:check": "tsc --noEmit",
+    "watch": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=dist/index.js --external:@aws-sdk/* --watch",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "package": "npm run build && cd dist && zip -r ../function.zip index.js",
+    "package:win": "npm run build && powershell -Command \"Compress-Archive -Path dist/index.js -DestinationPath function.zip -Force\""
+  },
+  "dependencies": {
+    "openai": "^4.73.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^22.10.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,21 @@
+# Lambda Function Build Artifacts
+dist/
+function.zip
+
+# Dependencies
+node_modules/
+
+# Environment files (use .env.example as template)
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
