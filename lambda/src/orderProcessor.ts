@@ -7,7 +7,9 @@ import type {
   ShopifyCustomer,
   ProcessedOrderData,
   ProcessedCustomerData,
+  CustomerType,
 } from "../../shared/types";
+import type { CustomerDataResponse } from "./httpClient";
 
 /**
  * Process raw Shopify order into a clean format for AI prompts
@@ -30,10 +32,72 @@ export function processOrderData(order: ShopifyOrder): ProcessedOrderData {
 }
 
 /**
- * Process customer data and determine customer type
+ * Determine customer type based on order count and total spent
  */
-export function processCustomerData(
-  customer: ShopifyCustomer | null
+function determineCustomerType(
+  ordersCount: number,
+  totalSpent: number
+): CustomerType {
+  if (ordersCount <= 1) {
+    return "first-time";
+  } else if (ordersCount >= 5 || totalSpent >= 500) {
+    return "vip";
+  } else {
+    return "repeat";
+  }
+}
+
+/**
+ * Process customer data using Shopify API data (accurate)
+ */
+export function processCustomerDataFromAPI(
+  apiData: CustomerDataResponse["customer"]
+): ProcessedCustomerData {
+  if (!apiData) {
+    return {
+      firstName: null,
+      lastName: null,
+      ordersCount: 1,
+      totalSpent: 0,
+      isFirstOrder: true,
+      customerType: "first-time",
+      daysSinceFirstOrder: null,
+    };
+  }
+
+  const ordersCount = apiData.numberOfOrders;
+  const totalSpent = apiData.amountSpent;
+  const isFirstOrder = ordersCount <= 1;
+  const customerType = determineCustomerType(ordersCount, totalSpent);
+
+  // Calculate days since first order
+  let daysSinceFirstOrder: number | null = null;
+  if (apiData.createdAt) {
+    const createdDate = new Date(apiData.createdAt);
+    const now = new Date();
+    daysSinceFirstOrder = Math.floor(
+      (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
+  }
+
+  return {
+    firstName: apiData.firstName,
+    lastName: apiData.lastName,
+    ordersCount,
+    totalSpent,
+    isFirstOrder,
+    customerType,
+    daysSinceFirstOrder,
+  };
+}
+
+/**
+ * Process customer data from webhook (fallback when API call fails)
+ * Uses heuristic based on customer creation time
+ */
+export function processCustomerDataFallback(
+  customer: ShopifyCustomer | null,
+  orderCreatedAt?: string
 ): ProcessedCustomerData {
   if (!customer) {
     return {
@@ -47,27 +111,27 @@ export function processCustomerData(
     };
   }
 
-  const ordersCount = customer.orders_count;
-  const totalSpent = parseFloat(customer.total_spent);
-  const isFirstOrder = ordersCount <= 1;
+  // Webhook payloads don't include orders_count, so we use a heuristic:
+  // If customer.created_at is very close to the order time, it's likely their first order
+  const customerCreatedAt = customer.created_at ? new Date(customer.created_at) : null;
+  const orderTime = orderCreatedAt ? new Date(orderCreatedAt) : new Date();
+  
+  // If customer was created within 60 seconds of the order, assume first-time
+  const timeDiffMs = customerCreatedAt 
+    ? Math.abs(orderTime.getTime() - customerCreatedAt.getTime())
+    : 0;
+  const isFirstOrder = timeDiffMs < 60000; // 60 seconds threshold
 
-  // Determine customer type based on order history and spend
-  let customerType: "first-time" | "repeat" | "vip";
-  if (isFirstOrder) {
-    customerType = "first-time";
-  } else if (ordersCount >= 4 || totalSpent >= 500) {
-    customerType = "vip";
-  } else {
-    customerType = "repeat";
-  }
+  const ordersCount = isFirstOrder ? 1 : 2;
+  const totalSpent = 0; // Not available in webhook payload
+  const customerType: CustomerType = isFirstOrder ? "first-time" : "repeat";
 
-  // Calculate days since first order
+  // Calculate days since first order (customer account creation)
   let daysSinceFirstOrder: number | null = null;
-  if (customer.created_at) {
-    const createdDate = new Date(customer.created_at);
+  if (customerCreatedAt) {
     const now = new Date();
     daysSinceFirstOrder = Math.floor(
-      (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)
+      (now.getTime() - customerCreatedAt.getTime()) / (1000 * 60 * 60 * 24)
     );
   }
 

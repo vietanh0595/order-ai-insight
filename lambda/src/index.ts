@@ -13,12 +13,13 @@ import type {
 } from "../../shared/types";
 import {
   processOrderData,
-  processCustomerData,
+  processCustomerDataFromAPI,
+  processCustomerDataFallback,
   extractShopDomain,
 } from "./orderProcessor";
 import { buildPrompt } from "./promptBuilder";
 import { generateInsight } from "./aiService";
-import { postInsightToApp, postErrorToApp } from "./httpClient";
+import { postInsightToApp, postErrorToApp, fetchCustomerData } from "./httpClient";
 
 /**
  * Main Lambda handler
@@ -59,6 +60,10 @@ export async function handler(
     };
   }
 
+  //log order data
+  //todo: remove sensitive data before logging
+  console.log(`[Lambda] Processing order`, order);
+
   // Extract shop domain
   let shop: string;
   try {
@@ -79,9 +84,31 @@ export async function handler(
   );
 
   try {
-    // Process order and customer data
+    // Process order data
     const orderData = processOrderData(order);
-    const customerData = processCustomerData(order.customer);
+
+    // Fetch accurate customer data from Shopify API via Remix
+    let customerData;
+    const customerId = order.customer?.id;
+    
+    if (customerId) {
+      console.log(`[Lambda] Fetching customer data for ${customerId}...`);
+      const customerResponse = await fetchCustomerData(shop, String(customerId));
+      
+      if (customerResponse.success && customerResponse.customer) {
+        customerData = processCustomerDataFromAPI(customerResponse.customer);
+        console.log(
+          `[Lambda] Customer API data: ${customerData.ordersCount} orders, $${customerData.totalSpent} spent, type: ${customerData.customerType}`
+        );
+      } else {
+        // Fallback to heuristic if API call fails
+        console.log(`[Lambda] Customer API failed, using fallback: ${customerResponse.error}`);
+        customerData = processCustomerDataFallback(order.customer, order.created_at);
+      }
+    } else {
+      // No customer (guest checkout)
+      customerData = processCustomerDataFallback(null);
+    }
 
     console.log(
       `[Lambda] Order: $${orderData.totalPrice}, ${orderData.itemCount} items, customer type: ${customerData.customerType}`

@@ -1,9 +1,27 @@
 /**
- * HTTP Client - Handles communication with Remix app ingestion endpoint
+ * HTTP Client - Handles communication with Remix app endpoints
  */
 
 import crypto from "crypto";
-import type { AIInsightPayload } from "../../shared/types";
+import type { AIInsightPayload, CustomerType } from "../../shared/types";
+
+/**
+ * Customer data response from Remix app
+ */
+export interface CustomerDataResponse {
+  success: boolean;
+  customer?: {
+    id: string;
+    numberOfOrders: number;
+    amountSpent: number;
+    currency: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    createdAt: string | null;
+  };
+  error?: string;
+}
 
 /**
  * Generate HMAC signature for payload
@@ -13,11 +31,9 @@ function signPayload(payload: string, secret: string): string {
 }
 
 /**
- * Post insight to Remix app ingestion endpoint
+ * Get app URL and HMAC secret from environment
  */
-export async function postInsightToApp(
-  payload: AIInsightPayload
-): Promise<{ success: boolean; id?: string; error?: string }> {
+function getConfig(): { appUrl: string; hmacSecret: string } {
   const appUrl = process.env.REMIX_APP_URL;
   if (!appUrl) {
     throw new Error("REMIX_APP_URL environment variable is not set");
@@ -27,6 +43,72 @@ export async function postInsightToApp(
   if (!hmacSecret) {
     throw new Error("HMAC_SECRET environment variable is not set");
   }
+
+  return { appUrl, hmacSecret };
+}
+
+/**
+ * Fetch customer data from Remix app (which calls Shopify API)
+ */
+export async function fetchCustomerData(
+  shop: string,
+  customerId: string
+): Promise<CustomerDataResponse> {
+  const { appUrl, hmacSecret } = getConfig();
+
+  const endpoint = `${appUrl}/api/customer-data`;
+  const body = JSON.stringify({ shop, customerId });
+  const signature = signPayload(body, hmacSecret);
+
+  console.log(`[HTTP] Fetching customer data for ${customerId} from ${shop}`);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Hmac-SHA256": signature,
+      },
+      body,
+    });
+
+    const responseData = (await response.json()) as CustomerDataResponse;
+
+    if (!response.ok) {
+      console.error(
+        `[HTTP] Error fetching customer data: ${response.status}`,
+        responseData
+      );
+      return {
+        success: false,
+        error: responseData.error || `HTTP ${response.status}`,
+      };
+    }
+
+    if (responseData.customer) {
+      console.log(
+        `[HTTP] Customer data: ${responseData.customer.numberOfOrders} orders, ${responseData.customer.amountSpent} spent`
+      );
+    }
+
+    return responseData;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[HTTP] Failed to fetch customer data:`, message);
+    return {
+      success: false,
+      error: message,
+    };
+  }
+}
+
+/**
+ * Post insight to Remix app ingestion endpoint
+ */
+export async function postInsightToApp(
+  payload: AIInsightPayload
+): Promise<{ success: boolean; id?: string; error?: string }> {
+  const { appUrl, hmacSecret } = getConfig();
 
   const endpoint = `${appUrl}/api/ai-insights/ingest`;
   const body = JSON.stringify(payload);
